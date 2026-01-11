@@ -37,17 +37,7 @@ uv run pip-audit
 
 echo ""
 echo "=== Checking for outdated dependencies ==="
-OUTDATED=$(uv pip list --outdated)
-echo "$OUTDATED"
-
-# Count outdated packages (excluding header lines)
-OUTDATED_COUNT=$(echo "$OUTDATED" | tail -n +3 | grep -v "^$" | wc -l)
-
-if [ "$OUTDATED_COUNT" -gt 0 ]; then
-  echo ""
-  echo "Error: Found $OUTDATED_COUNT outdated dependencies"
-  exit 1
-fi
+./renovate-check.sh
 
 echo ""
 echo "All health checks passed!"

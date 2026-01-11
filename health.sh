@@ -6,7 +6,7 @@ if ! command -v gitleaks &> /dev/null; then
   echo "Installing gitleaks..."
   TEMP_DIR=$(mktemp -d)
   cd "$TEMP_DIR"
-  
+
   ARCH=$(uname -m)
   if [ "$ARCH" = "x86_64" ]; then
     GITLEAKS_ARCH="x64"
@@ -16,7 +16,7 @@ if ! command -v gitleaks &> /dev/null; then
     echo "Unsupported architecture: $ARCH"
     exit 1
   fi
-  
+
   curl -sSfL "https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_*_linux_${GITLEAKS_ARCH}.tar.gz" | tar -xz
   sudo mv gitleaks /usr/local/bin/
   cd - > /dev/null
@@ -33,11 +33,11 @@ if ! command -v pip-audit &> /dev/null; then
   uv pip install pip-audit
 fi
 
-pip-audit
+uv run pip-audit
 
 echo ""
 echo "=== Checking for outdated dependencies ==="
 uv pip list --outdated
 
 echo ""
-echo "✅ Health checks passed!"
+echo "All health checks passed!"

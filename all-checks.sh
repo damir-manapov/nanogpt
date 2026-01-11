@@ -14,5 +14,5 @@ echo "========================================"
 
 echo ""
 echo "========================================"
-echo "✅ All checks completed successfully!"
+echo "All checks completed successfully!"
 echo "========================================"

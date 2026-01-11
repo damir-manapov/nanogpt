@@ -81,6 +81,9 @@ ignore = [
     "PLR2004", # Magic value used in comparison
     "ANN201",  # Missing return type annotation
 ]
+"train.py" = [
+    "T20",     # Allow print statements in training script
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

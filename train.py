@@ -8,6 +8,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import sentencepiece as spm
 import tiktoken
 
 MAX_LINE_PREVIEW = 100
@@ -101,6 +102,40 @@ def main() -> None:  # noqa: PLR0915
     print(f"Decoded: {decoded_tiktoken}")
     print(f"Decoding time: {tiktoken_decode_time * 1000:.4f}ms")
 
+    # 3. SentencePiece (using a temporary model trained on sample data)
+    print("\n--- SentencePiece encoding ---")
+    print("Note: Training a small SentencePiece model on sample data...")
+
+    # Create a temporary sample file for training
+    sample_path = Path("data/.sentencepiece_sample.txt")
+    sample_path.parent.mkdir(parents=True, exist_ok=True)
+    with sample_path.open("w", encoding="utf-8") as f:
+        f.write("\n".join(data_lines[:10000]))  # Use first 10k lines for training
+
+    # Train a small sentencepiece model
+    model_prefix = "data/.sentencepiece_model"
+    spm.SentencePieceTrainer.train(
+        f"--input={sample_path} --model_prefix={model_prefix} --vocab_size=1000 "
+        "--model_type=unigram --pad_id=0 --unk_id=1 --bos_id=2 --eos_id=3 "
+        "--user_defined_symbols=😎 --normalization_rule_name=identity"
+    )
+
+    sp = spm.SentencePieceProcessor()
+    sp.load(f"{model_prefix}.model")
+
+    start = time.time()
+    encoded_sp = sp.encode(test_sentence)
+    sp_encode_time = time.time() - start
+    print(f"Encoded: {encoded_sp}")
+    print(f"Length: {len(encoded_sp)} tokens")
+    print(f"Encoding time: {sp_encode_time * 1000:.4f}ms")
+
+    start = time.time()
+    decoded_sp = sp.decode(encoded_sp)
+    sp_decode_time = time.time() - start
+    print(f"Decoded: {decoded_sp}")
+    print(f"Decoding time: {sp_decode_time * 1000:.4f}ms")
+
     # Performance comparison
     print(f"\n{'=' * 60}")
     print("PERFORMANCE SUMMARY")
@@ -113,8 +148,13 @@ def main() -> None:  # noqa: PLR0915
         f"Tiktoken (GPT-2): {len(encoded_tiktoken)} tokens, "
         f"encode: {tiktoken_encode_time * 1000:.4f}ms, decode: {tiktoken_decode_time * 1000:.4f}ms"
     )
+    print(
+        f"SentencePiece: {len(encoded_sp)} tokens, "
+        f"encode: {sp_encode_time * 1000:.4f}ms, decode: {sp_decode_time * 1000:.4f}ms"
+    )
     print("\nCompression ratio (vs char-level):")
     print(f"  Tiktoken: {len(encoded_char) / len(encoded_tiktoken):.2f}x")
+    print(f"  SentencePiece: {len(encoded_char) / len(encoded_sp):.2f}x")
 
     # Show first 5 lines
     print(f"\n{'=' * 60}")

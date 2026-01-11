@@ -37,3 +37,6 @@ Thumbs.db
 data/
 checkpoints/
 models/
+
+# SentencePiece temporary files
+.sentencepiece_*

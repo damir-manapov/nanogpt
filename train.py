@@ -19,7 +19,7 @@ MAX_LINE_PREVIEW = 100
 MAX_LINES = 1_000_000  # Use only 1 million lines
 TRAIN_SPLIT = 0.9  # 90% train, 10% validation
 BLOCK_SIZE = 8  # Context length
-BATCH_SIZE = 4  # Number of sequences per batch
+BATCH_SIZE = 32  # Number of sequences per batch
 
 # Seed for reproducibility
 torch.manual_seed(1337)
@@ -382,6 +382,51 @@ def main() -> None:  # noqa: PLR0915
     print("\nGeneration (untrained model):")
     context = torch.zeros((1, 1), dtype=torch.long)  # Start with token 0
     generated = model.generate(context, max_new_tokens=100)
+    generated_text = decode(generated[0].tolist())
+    print(f"  {generated_text!r}")
+
+    # --- STEP 6: Optimizer ---
+    print(f"\n{'=' * 60}")
+    print("STEP 6: OPTIMIZER")
+    print(f"{'=' * 60}")
+
+    # Create optimizer
+    learning_rate = 1e-3
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+
+    print(f"Optimizer: AdamW")
+    print(f"Learning rate: {learning_rate}")
+    print(f"Parameters to optimize: {sum(p.numel() for p in model.parameters()):,}")
+
+    # Training loop
+    n_steps = 10000
+    print(f"\n--- Training for {n_steps} steps ---")
+
+    for step in range(n_steps):
+        # Get batch
+        xb, yb = get_batch("train")
+
+        # Forward pass
+        logits, loss = model(xb, yb)
+
+        # Backward pass
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
+
+        # Print progress
+        if step % 1000 == 0 or step == n_steps - 1:
+            print(f"Step {step:5d}: loss = {loss.item():.4f}")
+
+    # Check final loss on a new batch
+    xb, yb = get_batch("train")
+    _, final_loss = model(xb, yb)
+    print(f"\nFinal loss: {final_loss.item():.4f}")
+
+    # Generate text from trained model
+    print("\nGeneration (trained model):")
+    context = torch.zeros((1, 1), dtype=torch.long)  # Start with token 0
+    generated = model.generate(context, max_new_tokens=200)
     generated_text = decode(generated[0].tolist())
     print(f"  {generated_text!r}")
 

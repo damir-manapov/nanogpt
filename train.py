@@ -20,6 +20,7 @@ MAX_LINES = 1_000_000  # Use only 1 million lines
 TRAIN_SPLIT = 0.9  # 90% train, 10% validation
 BLOCK_SIZE = 8  # Context length
 BATCH_SIZE = 32  # Number of sequences per batch
+EVAL_ITERS = 200  # Number of batches to average for loss estimation
 
 # Seed for reproducibility
 torch.manual_seed(1337)
@@ -286,6 +287,30 @@ def main() -> None:  # noqa: PLR0915
         y = torch.stack([data_split[i + 1 : i + BLOCK_SIZE + 1] for i in ix])
         return x, y
 
+    @torch.no_grad()
+    def estimate_loss(model: nn.Module) -> dict[str, float]:
+        """Estimate loss on train and validation sets.
+
+        Averages loss over EVAL_ITERS batches for more stable estimates.
+
+        Args:
+            model: The model to evaluate
+
+        Returns:
+            Dictionary with 'train' and 'val' average losses
+        """
+        out = {}
+        model.eval()
+        for split in ["train", "val"]:
+            losses = torch.zeros(EVAL_ITERS)
+            for k in range(EVAL_ITERS):
+                x, y = get_batch(split)
+                _, loss = model(x, y)
+                losses[k] = loss.item()
+            out[split] = losses.mean().item()
+        model.train()
+        return out
+
     xb, yb = get_batch("train")
     print(f"\nBatch shapes: x={xb.shape}, y={yb.shape}")
 
@@ -400,9 +425,15 @@ def main() -> None:  # noqa: PLR0915
 
     # Training loop
     n_steps = 10000
+    eval_interval = 1000
     print(f"\n--- Training for {n_steps} steps ---")
 
     for step in range(n_steps):
+        # Evaluate loss on train and val periodically
+        if step % eval_interval == 0 or step == n_steps - 1:
+            losses = estimate_loss(model)
+            print(f"Step {step:5d}: train loss = {losses['train']:.4f}, val loss = {losses['val']:.4f}")
+
         # Get batch
         xb, yb = get_batch("train")
 
@@ -414,14 +445,9 @@ def main() -> None:  # noqa: PLR0915
         loss.backward()
         optimizer.step()
 
-        # Print progress
-        if step % 1000 == 0 or step == n_steps - 1:
-            print(f"Step {step:5d}: loss = {loss.item():.4f}")
-
-    # Check final loss on a new batch
-    xb, yb = get_batch("train")
-    _, final_loss = model(xb, yb)
-    print(f"\nFinal loss: {final_loss.item():.4f}")
+    # Final loss estimation
+    losses = estimate_loss(model)
+    print(f"\nFinal loss: train = {losses['train']:.4f}, val = {losses['val']:.4f}")
 
     # Generate text from trained model
     print("\nGeneration (trained model):")

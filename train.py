@@ -12,6 +12,8 @@ from pathlib import Path
 import sentencepiece as spm
 import tiktoken
 import torch
+import torch.nn as nn
+from torch.nn import functional as F
 
 MAX_LINE_PREVIEW = 100
 MAX_LINES = 1_000_000  # Use only 1 million lines
@@ -246,8 +248,8 @@ def main() -> None:  # noqa: PLR0915
 
     print(f"\nx (inputs):  {x_single.tolist()}")
     print(f"y (targets): {y_single.tolist()}")
-    print(f"\nDecoded x: {repr(decode(x_single.tolist()))}")
-    print(f"Decoded y: {repr(decode(y_single.tolist()))}")
+    print(f"\nDecoded x: {decode(x_single.tolist())!r}")
+    print(f"Decoded y: {decode(y_single.tolist())!r}")
 
     print("\nFor each position, predict next token based on context:")
     print("context -> target\n")
@@ -258,7 +260,7 @@ def main() -> None:  # noqa: PLR0915
         context_str = decode(context.tolist())
         target_str = decode([target.item()])
         print(f"  {context.tolist()!s:40} -> {target.item()}")
-        print(f"  {repr(context_str):40} -> {repr(target_str)}")
+        print(f"  {context_str!r:40} -> {target_str!r}")
         print()
 
     # --- STEP 4: Batched data (generalized approach) ---
@@ -292,8 +294,96 @@ def main() -> None:  # noqa: PLR0915
         print(f"\nBatch {b}:")
         print(f"  x: {xb[b].tolist()}")
         print(f"  y: {yb[b].tolist()}")
-        print(f"  Decoded x: {repr(decode(xb[b].tolist()))}")
-        print(f"  Decoded y: {repr(decode(yb[b].tolist()))}")
+        print(f"  Decoded x: {decode(xb[b].tolist())!r}")
+        print(f"  Decoded y: {decode(yb[b].tolist())!r}")
+
+    # --- STEP 5: Bigram Language Model ---
+    print(f"\n{'=' * 60}")
+    print("STEP 5: BIGRAM LANGUAGE MODEL")
+    print(f"{'=' * 60}")
+
+    class BigramLanguageModel(nn.Module):
+        """Simple bigram language model.
+
+        Each token directly looks up the logits for the next token
+        from an embedding table. No context is used beyond the
+        immediately preceding token.
+        """
+
+        def __init__(self, vocab_size: int) -> None:
+            super().__init__()
+            # Each token directly reads the logits for the next token
+            self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+
+        def forward(
+            self, idx: torch.Tensor, targets: torch.Tensor | None = None
+        ) -> tuple[torch.Tensor, torch.Tensor | None]:
+            """Forward pass.
+
+            Args:
+                idx: Input token indices, shape (B, T)
+                targets: Target token indices, shape (B, T), optional
+
+            Returns:
+                logits: Shape (B, T, vocab_size)
+                loss: Cross-entropy loss if targets provided, else None
+            """
+            # idx shape: (B, T), logits shape: (B, T, vocab_size)
+            logits = self.token_embedding_table(idx)
+
+            if targets is None:
+                loss = None
+            else:
+                # Reshape for cross_entropy: (B*T, vocab_size) and (B*T,)
+                b, t, c = logits.shape
+                logits_flat = logits.view(b * t, c)
+                targets_flat = targets.view(b * t)
+                loss = F.cross_entropy(logits_flat, targets_flat)
+
+            return logits, loss
+
+        def generate(self, idx: torch.Tensor, max_new_tokens: int) -> torch.Tensor:
+            """Generate new tokens.
+
+            Args:
+                idx: Starting context, shape (B, T)
+                max_new_tokens: Number of tokens to generate
+
+            Returns:
+                Extended sequence, shape (B, T + max_new_tokens)
+            """
+            for _ in range(max_new_tokens):
+                # Get predictions
+                logits, _ = self(idx)
+                # Focus only on the last time step
+                logits = logits[:, -1, :]  # (B, vocab_size)
+                # Apply softmax to get probabilities
+                probs = F.softmax(logits, dim=-1)  # (B, vocab_size)
+                # Sample from the distribution
+                idx_next = torch.multinomial(probs, num_samples=1)  # (B, 1)
+                # Append to the running sequence
+                idx = torch.cat((idx, idx_next), dim=1)  # (B, T+1)
+            return idx
+
+    # Create model
+    model = BigramLanguageModel(vocab_size)
+    print(f"Model created with vocab_size={vocab_size}")
+    print(f"Parameters: {sum(p.numel() for p in model.parameters()):,}")
+
+    # Test forward pass
+    logits, loss = model(xb, yb)
+    print(f"\nForward pass:")
+    print(f"  Input shape: {xb.shape}")
+    print(f"  Logits shape: {logits.shape}")
+    print(f"  Loss: {loss.item():.4f}")
+    print(f"  Expected loss (random): {-torch.log(torch.tensor(1.0 / vocab_size)).item():.4f}")
+
+    # Generate some text (untrained model - will be random)
+    print("\nGeneration (untrained model):")
+    context = torch.zeros((1, 1), dtype=torch.long)  # Start with token 0
+    generated = model.generate(context, max_new_tokens=100)
+    generated_text = decode(generated[0].tolist())
+    print(f"  {generated_text!r}")
 
     total_time = time.time() - start_time_total
     print(f"\nTotal execution time: {total_time:.2f}s")

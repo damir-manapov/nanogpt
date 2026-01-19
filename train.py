@@ -16,6 +16,11 @@ import torch
 MAX_LINE_PREVIEW = 100
 MAX_LINES = 1_000_000  # Use only 1 million lines
 TRAIN_SPLIT = 0.9  # 90% train, 10% validation
+BLOCK_SIZE = 8  # Context length
+BATCH_SIZE = 4  # Number of sequences per batch
+
+# Seed for reproducibility
+torch.manual_seed(1337)
 
 
 def main() -> None:  # noqa: PLR0915
@@ -213,18 +218,82 @@ def main() -> None:  # noqa: PLR0915
     print(f"Train memory: {train_memory_mb:.2f} MB")
     print(f"Validation memory: {val_memory_mb:.2f} MB")
 
-    # Show first 100 tokens
-    print(f"\nFirst 100 train tokens: {train_data[:100].tolist()}")
-    print(f"Decoded first 100 train tokens: {decode(train_data[:100].tolist())}")
-
-    # Show first 5 lines
+    # --- STEP 1: Show first 5 lines (raw data preview) ---
     print(f"\n{'=' * 60}")
-    print("FIRST 5 LINES")
+    print("STEP 1: FIRST 5 LINES (RAW DATA)")
     print(f"{'=' * 60}")
     for i, line in enumerate(data_lines[:5], 1):
         print(
             f"{i}. {line[:MAX_LINE_PREVIEW].strip()}{'...' if len(line) > MAX_LINE_PREVIEW else ''}"
         )
+
+    # --- STEP 2: Show first 100 tokens (tokenized preview) ---
+    print(f"\n{'=' * 60}")
+    print("STEP 2: FIRST 100 TRAIN TOKENS")
+    print(f"{'=' * 60}")
+    print(f"Tokens: {train_data[:100].tolist()}")
+    print(f"Decoded: {decode(train_data[:100].tolist())}")
+
+    # --- STEP 3: Single sequence example (simple x -> y) ---
+    print(f"\n{'=' * 60}")
+    print(f"STEP 3: SINGLE SEQUENCE EXAMPLE (block_size={BLOCK_SIZE})")
+    print(f"{'=' * 60}")
+
+    # Get first chunk (BLOCK_SIZE + 1 tokens needed to create x and y)
+    chunk = train_data[: BLOCK_SIZE + 1]
+    x_single = chunk[:BLOCK_SIZE]  # inputs: BLOCK_SIZE tokens
+    y_single = chunk[1 : BLOCK_SIZE + 1]  # targets: shifted by 1
+
+    print(f"\nx (inputs):  {x_single.tolist()}")
+    print(f"y (targets): {y_single.tolist()}")
+    print(f"\nDecoded x: {repr(decode(x_single.tolist()))}")
+    print(f"Decoded y: {repr(decode(y_single.tolist()))}")
+
+    print("\nFor each position, predict next token based on context:")
+    print("context -> target\n")
+
+    for t in range(BLOCK_SIZE):
+        context = x_single[: t + 1]
+        target = y_single[t]
+        context_str = decode(context.tolist())
+        target_str = decode([target.item()])
+        print(f"  {context.tolist()!s:40} -> {target.item()}")
+        print(f"  {repr(context_str):40} -> {repr(target_str)}")
+        print()
+
+    # --- STEP 4: Batched data (generalized approach) ---
+    print(f"\n{'=' * 60}")
+    print(f"STEP 4: BATCHED DATA (batch_size={BATCH_SIZE}, block_size={BLOCK_SIZE})")
+    print(f"{'=' * 60}")
+
+    # Function to get a batch of data
+    def get_batch(split: str) -> tuple[torch.Tensor, torch.Tensor]:
+        """Get a random batch of training or validation data.
+
+        Args:
+            split: Either 'train' or 'val'
+
+        Returns:
+            Tuple of (x, y) tensors, each of shape (batch_size, block_size)
+        """
+        data_split = train_data if split == "train" else val_data
+        # Generate random starting indices for each sequence in the batch
+        ix = torch.randint(len(data_split) - BLOCK_SIZE, (BATCH_SIZE,))
+        # Stack the sequences into batches
+        x = torch.stack([data_split[i : i + BLOCK_SIZE] for i in ix])
+        y = torch.stack([data_split[i + 1 : i + BLOCK_SIZE + 1] for i in ix])
+        return x, y
+
+    xb, yb = get_batch("train")
+    print(f"\nBatch shapes: x={xb.shape}, y={yb.shape}")
+
+    print("\n--- Train batch ---")
+    for b in range(BATCH_SIZE):
+        print(f"\nBatch {b}:")
+        print(f"  x: {xb[b].tolist()}")
+        print(f"  y: {yb[b].tolist()}")
+        print(f"  Decoded x: {repr(decode(xb[b].tolist()))}")
+        print(f"  Decoded y: {repr(decode(yb[b].tolist()))}")
 
     total_time = time.time() - start_time_total
     print(f"\nTotal execution time: {total_time:.2f}s")

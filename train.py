@@ -5,13 +5,17 @@ Run with: uv run train.py
 
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 
 import sentencepiece as spm
 import tiktoken
+import torch
 
 MAX_LINE_PREVIEW = 100
+MAX_LINES = 1_000_000  # Use only 1 million lines
+TRAIN_SPLIT = 0.9  # 90% train, 10% validation
 
 
 def main() -> None:  # noqa: PLR0915
@@ -31,10 +35,14 @@ def main() -> None:  # noqa: PLR0915
     load_time = time.time() - start_time
 
     total_lines = len(lines)
-    print(f"Total lines: {total_lines:,}")
+    print(f"Total lines in file: {total_lines:,}")
 
     # Skip comment lines
     data_lines = [line for line in lines if not line.startswith("#")]
+
+    # Limit to MAX_LINES
+    data_lines = data_lines[:MAX_LINES]
+    print(f"Using {len(data_lines):,} lines (limited to {MAX_LINES:,})")
 
     # Calculate total characters
     total_chars = sum(len(line) for line in data_lines)
@@ -62,7 +70,7 @@ def main() -> None:  # noqa: PLR0915
         return "".join([itos[i] for i in tokens])
 
     # Test encoding and decoding
-    test_sentence = "😎 Hello, world! This is a test."
+    test_sentence = "Hello, world! This is a test."
 
     # Character-level encoding
     print(f"\n{'=' * 60}")
@@ -117,7 +125,7 @@ def main() -> None:  # noqa: PLR0915
     spm.SentencePieceTrainer.train(
         f"--input={sample_path} --model_prefix={model_prefix} --vocab_size=1000 "
         "--model_type=unigram --pad_id=0 --unk_id=1 --bos_id=2 --eos_id=3 "
-        "--user_defined_symbols=😎 --normalization_rule_name=identity"
+        "--normalization_rule_name=identity"
     )
 
     sp = spm.SentencePieceProcessor()
@@ -155,6 +163,59 @@ def main() -> None:  # noqa: PLR0915
     print("\nCompression ratio (vs char-level):")
     print(f"  Tiktoken: {len(encoded_char) / len(encoded_tiktoken):.2f}x")
     print(f"  SentencePiece: {len(encoded_char) / len(encoded_sp):.2f}x")
+
+    # Tokenize entire dataset with character-level tokenizer
+    print(f"\n{'=' * 60}")
+    print("TOKENIZING ENTIRE DATASET (CHARACTER-LEVEL)")
+    print(f"{'=' * 60}")
+    print(f"Total characters to tokenize: {total_chars:,}")
+
+    start = time.time()
+    encoded_dataset = encode(text)
+    tokenize_time = time.time() - start
+
+    print(f"Total tokens: {len(encoded_dataset):,}")
+    print(f"Tokenization time: {tokenize_time:.2f}s")
+    print(f"Throughput: {total_chars / tokenize_time / 1_000_000:.2f}M chars/sec")
+
+    # Memory estimation
+    memory_mb = sys.getsizeof(encoded_dataset) / (1024 * 1024)
+    print(f"Memory usage (token array): {memory_mb:.2f} MB")
+
+    # Convert to torch tensor
+    print(f"\n{'=' * 60}")
+    print("LOADING TO TORCH AND SPLITTING")
+    print(f"{'=' * 60}")
+
+    start = time.time()
+    data = torch.tensor(encoded_dataset, dtype=torch.long)
+    torch_load_time = time.time() - start
+
+    print(f"Tensor shape: {data.shape}")
+    print(f"Tensor dtype: {data.dtype}")
+    print(f"Tensor device: {data.device}")
+    torch_memory_mb = data.element_size() * data.nelement() / (1024 * 1024)
+    print(f"Tensor memory: {torch_memory_mb:.2f} MB")
+    print(f"Torch conversion time: {torch_load_time:.2f}s")
+
+    # Split into train and validation
+    n = len(data)
+    train_size = int(n * TRAIN_SPLIT)
+    train_data = data[:train_size]
+    val_data = data[train_size:]
+
+    print(f"\nSplit: {TRAIN_SPLIT * 100:.0f}% train, {(1 - TRAIN_SPLIT) * 100:.0f}% validation")
+    print(f"Train size: {len(train_data):,} tokens")
+    print(f"Validation size: {len(val_data):,} tokens")
+
+    train_memory_mb = train_data.element_size() * train_data.nelement() / (1024 * 1024)
+    val_memory_mb = val_data.element_size() * val_data.nelement() / (1024 * 1024)
+    print(f"Train memory: {train_memory_mb:.2f} MB")
+    print(f"Validation memory: {val_memory_mb:.2f} MB")
+
+    # Show first 100 tokens
+    print(f"\nFirst 100 train tokens: {train_data[:100].tolist()}")
+    print(f"Decoded first 100 train tokens: {decode(train_data[:100].tolist())}")
 
     # Show first 5 lines
     print(f"\n{'=' * 60}")
